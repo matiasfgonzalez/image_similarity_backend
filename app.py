@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from scipy.spatial import distance
 from fastapi import FastAPI, File, UploadFile
-from typing import List
+from typing import List, Dict, Union
 
 app = FastAPI()
 
@@ -20,7 +20,8 @@ def calculate_similarity(hist1, hist2):
     """Calcula la similitud entre dos histogramas usando la distancia coseno."""
     return 1 - distance.cosine(hist1, hist2)
 
-def find_most_similar_image(uploaded_image_data, folder_path):
+def find_most_similar_image(uploaded_image_data, folder_path) -> List[Dict[str, Union[str, float]]]:
+    """Encuentra las imágenes más similares en la carpeta dada y devuelve una lista de diccionarios con nombres y similitudes."""
     uploaded_hist = calculate_histogram(uploaded_image_data)
     if uploaded_hist is None:
         return []
@@ -33,7 +34,8 @@ def find_most_similar_image(uploaded_image_data, folder_path):
             stored_hist = calculate_histogram(stored_image_data)
             if stored_hist is not None:
                 similarity = calculate_similarity(uploaded_hist, stored_hist)
-                similarities.append({"filename": filename, "similarity": similarity})
+                # Convertimos numpy.float32 a float para evitar problemas de serialización
+                similarities.append({"filename": filename, "similarity": float(similarity)})
 
     similarities.sort(key=lambda x: x["similarity"], reverse=True)
     return similarities
