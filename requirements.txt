@@ -4,3 +4,4 @@ opencv-python-headless
 scipy
 numpy
 python-multipart
+cx_Oracle

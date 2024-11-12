@@ -5,6 +5,7 @@ from scipy.spatial import distance
 from fastapi import FastAPI, File, UploadFile
 from typing import List, Dict, Union
 from fastapi.middleware.cors import CORSMiddleware
+import cx_Oracle
 
 app = FastAPI()
 
@@ -16,6 +17,11 @@ app.add_middleware(
     allow_methods=["*"],  # Permite todos los métodos HTTP (GET, POST, etc.)
     allow_headers=["*"],  # Permite todos los encabezados
 )
+
+# Configuración de la conexión a la base de datos Oracle
+def get_oracle_connection():
+    dsn = cx_Oracle.makedsn("hostname", "port", service_name="service_name")  # Reemplaza con tus datos
+    return cx_Oracle.connect(user="your_username", password="your_password", dsn=dsn)
 
 def calculate_histogram(image_data, color_space=cv2.COLOR_BGR2GRAY):
     """Calcula el histograma de una imagen en un espacio de color especificado."""
@@ -47,37 +53,57 @@ def compare_orb_features(desc1, desc2):
     matches = bf.match(desc1, desc2)
     return len(matches) / max(len(desc1), len(desc2)) if desc1 is not None else 0.0
 
-def find_most_similar_image(uploaded_image_data, folder_path) -> List[Dict[str, Union[str, float]]]:
-    """Encuentra las imágenes más similares en la carpeta dada y devuelve una lista de diccionarios con nombres y similitudes."""
+def get_images_from_db() -> List[Dict[str, Union[str, bytes]]]:
+    """Obtiene las imágenes de la base de datos Oracle en formato BLOB."""
+    connection = get_oracle_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT image_id, image_data FROM tbl_imagenes")
+    images = []
+    for image_id, image_data in cursor:
+        images.append({
+            "image_id": image_id,
+            "image_data": image_data
+        })
+
+    cursor.close()
+    connection.close()
+    return images
+
+def find_most_similar_image(uploaded_image_data) -> List[Dict[str, Union[str, float]]]:
+    """Encuentra las imágenes más similares en la base de datos y devuelve una lista de diccionarios con nombres y similitudes."""
     # Calcular histogramas en escala de grises y color para la imagen cargada
     uploaded_hist_gray = calculate_histogram(uploaded_image_data, color_space=cv2.COLOR_BGR2GRAY)
     uploaded_hist_hsv = calculate_histogram(uploaded_image_data, color_space=cv2.COLOR_BGR2HSV)
     uploaded_orb_desc = calculate_orb_features(uploaded_image_data)
 
     similarities = []
-    for filename in os.listdir(folder_path):
-        image_path = os.path.join(folder_path, filename)
-        with open(image_path, "rb") as f:
-            stored_image_data = f.read()
-            # Calcular histogramas y descriptores ORB para la imagen almacenada
-            stored_hist_gray = calculate_histogram(stored_image_data, color_space=cv2.COLOR_BGR2GRAY)
-            stored_hist_hsv = calculate_histogram(stored_image_data, color_space=cv2.COLOR_BGR2HSV)
-            stored_orb_desc = calculate_orb_features(stored_image_data)
-            
-            # Calcular similitudes
-            gray_similarity = calculate_similarity(uploaded_hist_gray, stored_hist_gray)
-            hsv_similarity = calculate_similarity(uploaded_hist_hsv, stored_hist_hsv)
-            orb_similarity = compare_orb_features(uploaded_orb_desc, stored_orb_desc)
-            
-            # Calcular un puntaje promedio
-            average_similarity = (gray_similarity + hsv_similarity + orb_similarity) / 3
-            similarities.append({
-                "filename": filename,
-                "gray_similarity": float(gray_similarity),
-                "hsv_similarity": float(hsv_similarity),
-                "orb_similarity": float(orb_similarity),
-                "average_similarity": float(average_similarity)
-            })
+    
+    # Obtener imágenes de la base de datos
+    images_from_db = get_images_from_db()
+
+    for image in images_from_db:
+        stored_image_data = image["image_data"]
+
+        # Calcular histogramas y descriptores ORB para la imagen almacenada
+        stored_hist_gray = calculate_histogram(stored_image_data, color_space=cv2.COLOR_BGR2GRAY)
+        stored_hist_hsv = calculate_histogram(stored_image_data, color_space=cv2.COLOR_BGR2HSV)
+        stored_orb_desc = calculate_orb_features(stored_image_data)
+        
+        # Calcular similitudes
+        gray_similarity = calculate_similarity(uploaded_hist_gray, stored_hist_gray)
+        hsv_similarity = calculate_similarity(uploaded_hist_hsv, stored_hist_hsv)
+        orb_similarity = compare_orb_features(uploaded_orb_desc, stored_orb_desc)
+        
+        # Calcular un puntaje promedio
+        average_similarity = (gray_similarity + hsv_similarity + orb_similarity) / 3
+        similarities.append({
+            "image_id": image["image_id"],
+            "gray_similarity": float(gray_similarity),
+            "hsv_similarity": float(hsv_similarity),
+            "orb_similarity": float(orb_similarity),
+            "average_similarity": float(average_similarity)
+        })
 
     similarities.sort(key=lambda x: x["average_similarity"], reverse=True)
     return similarities
@@ -85,8 +111,8 @@ def find_most_similar_image(uploaded_image_data, folder_path) -> List[Dict[str, 
 @app.post("/compare-image")
 async def compare_image(file: UploadFile = File(...)):
     image_data = await file.read()
-    folder_path = "images/stored_images"
-    similarities = find_most_similar_image(image_data, folder_path)
+
+    similarities = find_most_similar_image(image_data)
 
     if similarities:
         return {"similar_images": similarities}
