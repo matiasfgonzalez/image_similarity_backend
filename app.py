@@ -4,8 +4,18 @@ import numpy as np
 from scipy.spatial import distance
 from fastapi import FastAPI, File, UploadFile
 from typing import List, Dict, Union
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+# Configuración de CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite todas las solicitudes desde cualquier origen
+    allow_credentials=True,
+    allow_methods=["*"],  # Permite todos los métodos HTTP (GET, POST, etc.)
+    allow_headers=["*"],  # Permite todos los encabezados
+)
 
 def calculate_histogram(image_data, color_space=cv2.COLOR_BGR2GRAY):
     """Calcula el histograma de una imagen en un espacio de color especificado."""
